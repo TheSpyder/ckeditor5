@@ -7,8 +7,8 @@
  * @module html-embed/htmlembedediting
  */
 
-import { Plugin, icons, type Editor } from 'ckeditor5/src/core';
-import { ButtonView } from 'ckeditor5/src/ui';
+import { Plugin, type Editor } from 'ckeditor5/src/core';
+import type { ButtonView } from 'ckeditor5/src/ui';
 import { toWidget } from 'ckeditor5/src/widget';
 import { logWarning, createElement } from 'ckeditor5/src/utils';
 
@@ -16,6 +16,9 @@ import type { HtmlEmbedConfig } from './htmlembedconfig';
 import HtmlEmbedCommand from './htmlembedcommand';
 
 import '../theme/htmlembed.css';
+import { init } from './codemirror';
+
+import type { EditorView } from '@codemirror/view';
 
 /**
  * The HTML embed editing feature.
@@ -84,13 +87,12 @@ export default class HtmlEmbedEditing extends Plugin {
 	private _setupConversion() {
 		const editor = this.editor;
 		const t = editor.t;
-		const view = editor.editing.view;
 		const widgetButtonViewReferences = this._widgetButtonViewReferences;
-		const htmlEmbedConfig: HtmlEmbedConfig = editor.config.get( 'htmlEmbed' )!;
+		// const htmlEmbedConfig: HtmlEmbedConfig = editor.config.get( 'htmlEmbed' )!;
 
 		// Destroy UI buttons created for widgets that have been removed from the view document (e.g. in the previous conversion).
 		// This prevents unexpected memory leaks from UI views.
-		this.editor.editing.view.on( 'render', () => {
+		editor.editing.view.on( 'render', () => {
 			for ( const buttonView of widgetButtonViewReferences ) {
 				if ( buttonView.element && buttonView.element.isConnected ) {
 					return;
@@ -134,93 +136,39 @@ export default class HtmlEmbedEditing extends Plugin {
 		editor.conversion.for( 'editingDowncast' ).elementToStructure( {
 			model: { name: 'rawHtml', attributes: [ 'value' ] },
 			view: ( modelElement, { writer } ) => {
-				let domContentWrapper: HTMLElement;
-				let state: State;
-				let props: Props;
-
 				const viewContentWrapper = writer.createRawElement( 'div', {
+					attributes: {
+						'data-cke-ignore-events': 'true'
+					},
 					class: 'raw-html-embed__content-wrapper'
 				}, function( domElement ) {
-					domContentWrapper = domElement;
+					const setRawHtmlValue = ( content: string ) => {
+						// This is wrong
+						modelElement._setAttribute( 'value', content );
 
-					renderContent( { editor, domElement, state, props } );
+						// TODO: Doing it properly seems to cause the whole widget to re-render, which means typing loses focus
+						// editor.model.change( writer => {
+						// writer.setAttribute( 'value', content, modelElement );
+						// } );
+					};
+					const getRawHtmlValue = () => modelElement.getAttribute( 'value' ) as string || '';
+					renderContent( { domElement, getRawHtmlValue, setRawHtmlValue } );
 
 					// Since there is a `data-cke-ignore-events` attribute set on the wrapper element in the editable mode,
 					// the explicit `mousedown` handler on the `capture` phase is needed to move the selection onto the whole
 					// HTML embed widget.
-					domContentWrapper.addEventListener( 'mousedown', () => {
-						if ( state.isEditable ) {
-							const model = editor.model;
-							const selectedElement = model.document.selection.getSelectedElement();
+					domElement.addEventListener( 'mousedown', () => {
+						const model = editor.model;
+						const selectedElement = model.document.selection.getSelectedElement();
 
-							// Move the selection onto the whole HTML embed widget if it's currently not selected.
-							if ( selectedElement !== modelElement ) {
-								model.change( writer => writer.setSelection( modelElement, 'on' ) );
-							}
+						// Move the selection onto the whole HTML embed widget if it's currently not selected.
+						if ( selectedElement !== modelElement ) {
+							model.change( writer => writer.setSelection( modelElement, 'on' ) );
 						}
 					}, true );
 				} );
 
-				// API exposed on each raw HTML embed widget so other features can control a particular widget.
-				const rawHtmlApi: RawHtmlApi = {
-					makeEditable() {
-						state = Object.assign( {}, state, {
-							isEditable: true
-						} );
-
-						renderContent( { domElement: domContentWrapper, editor, state, props } );
-
-						view.change( writer => {
-							writer.setAttribute( 'data-cke-ignore-events', 'true', viewContentWrapper );
-						} );
-
-						// This could be potentially pulled to a separate method called focusTextarea().
-						domContentWrapper.querySelector( 'textarea' )!.focus();
-					},
-					save( newValue: string ) {
-						// If the value didn't change, we just cancel. If it changed,
-						// it's enough to update the model – the entire widget will be reconverted.
-						if ( newValue !== state.getRawHtmlValue() ) {
-							editor.execute( 'htmlEmbed', newValue );
-							editor.editing.view.focus();
-						} else {
-							this.cancel();
-						}
-					},
-					cancel() {
-						state = Object.assign( {}, state, {
-							isEditable: false
-						} );
-
-						renderContent( { domElement: domContentWrapper, editor, state, props } );
-						editor.editing.view.focus();
-
-						view.change( writer => {
-							writer.removeAttribute( 'data-cke-ignore-events', viewContentWrapper );
-						} );
-					}
-				};
-
-				state = {
-					showPreviews: htmlEmbedConfig.showPreviews,
-					isEditable: false,
-					getRawHtmlValue: () => modelElement.getAttribute( 'value' ) as string || ''
-				};
-
-				props = {
-					sanitizeHtml: htmlEmbedConfig.sanitizeHtml,
-					textareaPlaceholder: t( 'Paste raw HTML here...' ),
-
-					onEditClick() {
-						rawHtmlApi.makeEditable();
-					},
-					onSaveClick( newValue ) {
-						rawHtmlApi.save( newValue );
-					},
-					onCancelClick() {
-						rawHtmlApi.cancel();
-					}
-				};
+				writer.setAttribute( 'data-cke-ignore-events', 'true', viewContentWrapper );
 
 				const viewContainer = writer.createContainerElement( 'div', {
 					class: 'raw-html-embed',
@@ -228,7 +176,6 @@ export default class HtmlEmbedEditing extends Plugin {
 					dir: editor.locale.uiLanguageDirection
 				}, viewContentWrapper );
 
-				writer.setCustomProperty( 'rawHtmlApi', rawHtmlApi, viewContainer );
 				writer.setCustomProperty( 'rawHtml', true, viewContainer );
 
 				return toWidget( viewContainer, writer, {
@@ -239,213 +186,31 @@ export default class HtmlEmbedEditing extends Plugin {
 		} );
 
 		function renderContent( {
-			editor,
 			domElement,
-			state,
-			props
+			getRawHtmlValue,
+			setRawHtmlValue
 		}: {
-			editor: Editor;
 			domElement: HTMLElement;
-			state: State;
-			props: Props;
+			getRawHtmlValue: () => string;
+			setRawHtmlValue: ( content: string ) => void;
 		} ) {
 			// Remove all children;
 			domElement.textContent = '';
 
 			const domDocument = domElement.ownerDocument;
-			let domTextarea: HTMLTextAreaElement;
 
-			if ( state.isEditable ) {
-				const textareaProps = {
-					isDisabled: false,
-					placeholder: props.textareaPlaceholder
-				};
-
-				domTextarea = createDomTextarea( { domDocument, state, props: textareaProps } );
-
-				domElement.append( domTextarea );
-			} else if ( state.showPreviews ) {
-				const previewContainerProps = {
-					sanitizeHtml: props.sanitizeHtml
-				};
-
-				domElement.append( createPreviewContainer( { domDocument, state, props: previewContainerProps, editor } ) );
-			} else {
-				const textareaProps = {
-					isDisabled: true,
-					placeholder: props.textareaPlaceholder
-				};
-
-				domElement.append( createDomTextarea( { domDocument, state, props: textareaProps } ) );
-			}
-
-			const buttonsWrapperProps = {
-				onEditClick: props.onEditClick,
-				onSaveClick: () => {
-					props.onSaveClick( domTextarea.value );
-				},
-				onCancelClick: props.onCancelClick
-			};
-
-			domElement.prepend( createDomButtonsWrapper( { editor, domDocument, state, props: buttonsWrapperProps } ) );
-		}
-
-		function createDomButtonsWrapper( {
-			editor,
-			domDocument,
-			state,
-			props
-		}: {
-			editor: Editor;
-			domDocument: Document;
-			state: State;
-			props: Pick<Props, 'onEditClick' | 'onCancelClick'> & {
-				onSaveClick(): void;
-			};
-		} ): HTMLDivElement {
-			const domButtonsWrapper = createElement( domDocument, 'div', {
-				class: 'raw-html-embed__buttons-wrapper'
-			} );
-
-			if ( state.isEditable ) {
-				const saveButtonView = createUIButton( editor, 'save', props.onSaveClick );
-				const cancelButtonView = createUIButton( editor, 'cancel', props.onCancelClick );
-
-				domButtonsWrapper.append( saveButtonView.element!, cancelButtonView.element! );
-				widgetButtonViewReferences.add( saveButtonView ).add( cancelButtonView );
-			} else {
-				const editButtonView = createUIButton( editor, 'edit', props.onEditClick );
-
-				domButtonsWrapper.append( editButtonView.element! );
-				widgetButtonViewReferences.add( editButtonView );
-			}
-
-			return domButtonsWrapper;
-		}
-
-		function createDomTextarea( {
-			domDocument,
-			state,
-			props
-		}: {
-				domDocument: Document;
-				state: State;
-				props: {
-					isDisabled: boolean;
-					placeholder: string;
-				};
-			} ): HTMLTextAreaElement {
-			const domTextarea = createElement( domDocument, 'textarea', {
-				placeholder: props.placeholder,
+			const domTextarea = createElement( domDocument, 'div', {
+				// placeholder: props.placeholder,
 				class: 'ck ck-reset ck-input ck-input-text raw-html-embed__source'
 			} );
 
-			domTextarea.disabled = props.isDisabled;
-			domTextarea.value = state.getRawHtmlValue();
+			const cmi = init( domTextarea, getRawHtmlValue(), setRawHtmlValue, t( 'Paste raw HTML here...' ) );
 
-			return domTextarea;
-		}
+			domElement.append( domTextarea );
 
-		function createPreviewContainer( {
-			editor,
-			domDocument,
-			state,
-			props
-		}: {
-			editor: Editor;
-			domDocument: Document;
-			state: State;
-			props: {
-				sanitizeHtml: HtmlEmbedConfig['sanitizeHtml'];
-			};
-		} ): HTMLDivElement {
-			const sanitizedOutput = props.sanitizeHtml!( state.getRawHtmlValue() );
-			const placeholderText = state.getRawHtmlValue().length > 0 ?
-				t( 'No preview available' ) :
-				t( 'Empty snippet content' );
-
-			const domPreviewPlaceholder = createElement( domDocument, 'div', {
-				class: 'ck ck-reset_all raw-html-embed__preview-placeholder'
-			}, placeholderText );
-
-			const domPreviewContent = createElement( domDocument, 'div', {
-				class: 'raw-html-embed__preview-content',
-				dir: editor.locale.contentLanguageDirection
-			} );
-
-			// Creating a contextual document fragment allows executing scripts when inserting into the preview element.
-			// See: #8326.
-			const domRange = domDocument.createRange();
-			const domDocumentFragment = domRange.createContextualFragment( sanitizedOutput.html );
-
-			domPreviewContent.appendChild( domDocumentFragment );
-
-			const domPreviewContainer = createElement( domDocument, 'div', {
-				class: 'raw-html-embed__preview'
-			}, [
-				domPreviewPlaceholder, domPreviewContent
-			] );
-
-			return domPreviewContainer;
+			return cmi;
 		}
 	}
-}
-
-/**
- * Returns a UI button view that can be used in conversion.
- */
-function createUIButton( editor: Editor, type: 'edit' | 'save' | 'cancel', onClick: () => void ): ButtonView {
-	const { t } = editor.locale;
-	const buttonView = new ButtonView( editor.locale );
-	const command: HtmlEmbedCommand = editor.commands.get( 'htmlEmbed' )!;
-
-	buttonView.set( {
-		class: `raw-html-embed__${ type }-button`,
-		icon: icons.pencil,
-		tooltip: true,
-		tooltipPosition: editor.locale.uiLanguageDirection === 'rtl' ? 'e' : 'w'
-	} );
-
-	buttonView.render();
-
-	if ( type === 'edit' ) {
-		buttonView.set( {
-			icon: icons.pencil,
-			label: t( 'Edit source' )
-		} );
-
-		buttonView.bind( 'isEnabled' ).to( command );
-	} else if ( type === 'save' ) {
-		buttonView.set( {
-			icon: icons.check,
-			label: t( 'Save changes' )
-		} );
-
-		buttonView.bind( 'isEnabled' ).to( command );
-	} else {
-		buttonView.set( {
-			icon: icons.cancel,
-			label: t( 'Cancel' )
-		} );
-	}
-
-	buttonView.on( 'execute', onClick );
-
-	return buttonView;
-}
-
-interface State {
-	showPreviews: HtmlEmbedConfig['showPreviews'];
-	isEditable: boolean;
-	getRawHtmlValue(): string;
-}
-
-interface Props {
-	sanitizeHtml: HtmlEmbedConfig['sanitizeHtml'];
-	textareaPlaceholder: string;
-	onEditClick(): void;
-	onSaveClick( newValue: string ): void;
-	onCancelClick(): void;
 }
 
 export interface RawHtmlApi {
