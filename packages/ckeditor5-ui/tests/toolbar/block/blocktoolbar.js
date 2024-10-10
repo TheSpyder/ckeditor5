@@ -393,6 +393,16 @@ describe( 'BlockToolbar', () => {
 				sinon.assert.calledOnce( focusSpy );
 			} );
 
+			it( 'should hide the #panelView and do not focus the editable when isEnabled became false', () => {
+				blockToolbar.panelView.isVisible = true;
+				const spy = testUtils.sinon.spy( editor.editing.view, 'focus' );
+
+				blockToolbar.buttonView.isEnabled = false;
+
+				expect( blockToolbar.panelView.isVisible ).to.be.false;
+				sinon.assert.notCalled( spy );
+			} );
+
 			it( 'should hide the #panelView and focus the editable on #execute event when panel was visible', () => {
 				blockToolbar.panelView.isVisible = true;
 				const spy = testUtils.sinon.spy( editor.editing.view, 'focus' );
@@ -903,6 +913,29 @@ describe( 'BlockToolbar', () => {
 			clock.tick( 100 );
 
 			expect( spy ).to.be.calledOnce;
+		} );
+
+		it( 'should not _call _clipButtonToViewport when event target is not editable ancestor', () => {
+			const spy = sinon.spy( blockToolbar, '_clipButtonToViewport' );
+
+			buttonView.isVisible = true;
+
+			document.body.dispatchEvent( new Event( 'scroll' ) );
+			clock.tick( 100 );
+			expect( spy ).to.be.called;
+
+			spy.resetHistory();
+
+			// Create a fake parent element and dispatch scroll event on it.
+			// It's not a button ancestor so _clipButtonToViewport should not be called.
+			const evt = new Event( 'scroll' );
+			const fakeParent = document.createElement( 'div' );
+
+			sinon.stub( evt, 'target' ).value( fakeParent );
+			document.body.dispatchEvent( evt );
+			clock.tick( 100 );
+			fakeParent.remove();
+			expect( spy ).not.to.be.called;
 		} );
 	} );
 

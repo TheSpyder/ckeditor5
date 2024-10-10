@@ -3,7 +3,7 @@
 	"slug": "ckeditor5",
 	"hooks": {
 		"beforeHexo": [
-			"../scripts/docs/build-content-styles.js"
+			"../scripts/docs/build-content-styles.mjs"
 		]
 	},
 	"reportIssueWidget": {
@@ -365,11 +365,12 @@
 		"features/toolbar/blocktoolbar.html": "getting-started/setup/toolbar.html#block-toolbar",
 		"features/toolbar/menubar.html": "getting-started/setup/menubar.html",
 		"examples/builds-custom/bottom-toolbar-editor.html": "examples/framework/bottom-toolbar-editor.html",
-		"examples/how-tos.html": "framework/how-tos.html"
+		"examples/how-tos.html": "framework/how-tos.html",
+		"examples/framework/content-placeholder.html": "features/merge-fields.html"
 	},
 	"scripts": {
-		"snippet-adapter": "../scripts/docs/snippetadapter",
-		"import-path": "../scripts/docs/getrealimportpath"
+		"snippet-adapter": "../scripts/docs/snippetadapter.mjs",
+		"import-path": "../scripts/docs/getrealimportpath.mjs"
 	},
 	"docsearch": {
 		"apiKey": "fc463c26455365ad403d5ec51796cd73",
